@@ -11,15 +11,8 @@ python-dotenv==1.1.0
 # Document Processing
 PyMuPDF==1.23.8
 
-# GUI
-PyQt5==5.15.10
-
-# File System
-watchdog==3.0.0
-
 # HTTP Client
 requests==2.31.0
 
-# Type Checking
-mypy==1.8.0
-types-requests==2.31.0.20240125
+# Web Scraping
+beautifulsoup4==4.12.2

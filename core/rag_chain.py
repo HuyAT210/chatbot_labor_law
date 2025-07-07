@@ -98,7 +98,7 @@ tool_functions = [
         "type": "function",
         "function": {
             "name": "ask_with_full_context",
-            "description": "Answer vague or creative questions using full document context",
+            "description": "Use this ONLY for extremely vague, overly broad, or non-specific questions that cannot be answered with focused search. For example: 'Tell me everything', 'What do you know?', 'Give me information'. For specific questions, use ask_llm_with_context instead.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -124,6 +124,8 @@ def ask_question_smart_with_toolcall(query: str) -> str:
                 "content": (
                     "You are a helpful assistant. Based on the user's question, "
                     "you must choose one of the available functions to best answer it. "
+                    "PREFER ask_llm_with_context for specific questions. "
+                    "ONLY use ask_with_full_context for extremely vague questions like 'Tell me everything' or 'What do you know?'. "
                     "Do not respond directly. Always select a tool."
                 )
             },
@@ -157,6 +159,14 @@ def ask_question_smart_with_toolcall(query: str) -> str:
     if func_name == "ask_llm_with_context":
         return ask_llm_with_context(arguments["query"])
     elif func_name == "ask_with_full_context":
-        return ask_with_full_context(arguments["query"])
+        # Instead of processing huge context, ask user to be more specific
+        return (
+            "🤔 Your question seems quite broad. To give you a more helpful and focused answer, "
+            "could you please be more specific? For example:\n\n"
+            "• Instead of 'Tell me about immigration', try 'What are the requirements for naturalization?'\n"
+            "• Instead of 'What forms do I need?', try 'What forms are required for a green card application?'\n"
+            "• Instead of 'How long does it take?', try 'How long does the naturalization process typically take?'\n\n"
+            "This will help me find the most relevant information from your documents and give you a precise answer!"
+        )
     else:
         return f"❌ Unknown function selected: {func_name}"
