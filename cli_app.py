@@ -14,7 +14,7 @@ from typing import List
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 from core.rag_chain import ask_question_smart_with_toolcall, ask_llm_with_context, ask_with_full_context
-from core.milvus_utilis import save_to_milvus, search_similar_chunks, delete_file, collection
+from core.milvus_utilis import save_to_milvus, search_similar_chunks, delete_file, delete_all, collection
 from core.embedding import split_into_chunks
 import fitz  # PyMuPDF
 
@@ -83,6 +83,7 @@ def interactive_mode():
     print("  upload <file>      - Upload and process a document")
     print("  search <query>     - Search for similar content")
     print("  delete <filename>  - Delete a document from the database")
+    print("  delete-all         - Delete ALL data from the database")
     print("  list               - List all documents in the database")
     print("  help               - Show this help message")
     print("  quit               - Exit the application")
@@ -107,6 +108,7 @@ def interactive_mode():
                 print("  upload <file>      - Upload and process a document")
                 print("  search <query>     - Search for similar content")
                 print("  delete <filename>  - Delete a document from the database")
+                print("  delete-all         - Delete ALL data from the database")
                 print("  list               - List all documents in the database")
                 print("  help               - Show this help message")
                 print("  quit               - Exit the application")
@@ -166,6 +168,18 @@ def interactive_mode():
                 else:
                     print("❌ Please provide a filename after 'delete'")
                     
+            elif user_input.lower() == 'delete-all':
+                print("🗑️ WARNING: This will delete ALL data from the database!")
+                confirm = input("Are you sure? Type 'yes' to confirm: ").strip().lower()
+                if confirm == 'yes':
+                    try:
+                        result = delete_all()
+                        print(f"✅ {result['message']}")
+                    except Exception as e:
+                        print(f"❌ Error: {e}")
+                else:
+                    print("❌ Delete all operation cancelled.")
+                    
             elif user_input.lower() == 'list':
                 try:
                     collection.load()
@@ -207,12 +221,13 @@ def main():
     parser.add_argument("--upload", "-u", help="Upload and process a document")
     parser.add_argument("--search", "-s", help="Search for similar content")
     parser.add_argument("--delete", "-d", help="Delete a document from the database")
+    parser.add_argument("--delete-all", action="store_true", help="Delete ALL data from the database")
     parser.add_argument("--list", "-l", action="store_true", help="List all documents")
     parser.add_argument("--interactive", "-i", action="store_true", help="Run in interactive mode")
     
     args = parser.parse_args()
     
-    if args.interactive or not any([args.ask, args.upload, args.search, args.delete, args.list]):
+    if args.interactive or not any([args.ask, args.upload, args.search, args.delete, args.delete_all, args.list]):
         interactive_mode()
     else:
         # Single command mode
@@ -247,6 +262,18 @@ def main():
                 print(f"✅ {result['message']}")
             except Exception as e:
                 print(f"❌ Error: {e}")
+                
+        elif args.delete_all:
+            print("🗑️ WARNING: This will delete ALL data from the database!")
+            confirm = input("Are you sure? Type 'yes' to confirm: ").strip().lower()
+            if confirm == 'yes':
+                try:
+                    result = delete_all()
+                    print(f"✅ {result['message']}")
+                except Exception as e:
+                    print(f"❌ Error: {e}")
+            else:
+                print("❌ Delete all operation cancelled.")
                 
         elif args.list:
             try:

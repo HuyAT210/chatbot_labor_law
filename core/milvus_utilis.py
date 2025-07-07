@@ -109,3 +109,41 @@ def delete_file(filename: str):
         "filename": filename,
         "message": f"✅ Deleted all chunks of {filename} from Milvus."
     }
+
+def delete_all():
+    """
+    Delete all data from the Milvus collection.
+    """
+    try:
+        collection.load()
+        
+        # First, get all IDs in the collection using a proper expression
+        results = collection.query(
+            expr="id != ''",  # This will match all records since all have non-empty IDs
+            output_fields=["id"],
+            limit=10000  # Adjust if you have more records
+        )
+        
+        if not results:
+            print("📭 No data to delete - collection is already empty.")
+            return {
+                "message": "📭 No data to delete - collection is already empty."
+            }
+        
+        # Extract all IDs
+        ids_to_delete = [r["id"] for r in results]
+        
+        # Delete by IDs
+        collection.delete(expr=f"id in {ids_to_delete}")
+        collection.flush()
+        
+        print(f"🗑️ Deleted {len(ids_to_delete)} records from Milvus collection.")
+        
+        return {
+            "message": f"✅ Successfully deleted {len(ids_to_delete)} records from the database."
+        }
+    except Exception as e:
+        print(f"❌ Error deleting all data: {e}")
+        return {
+            "message": f"❌ Error deleting all data: {e}"
+        }
