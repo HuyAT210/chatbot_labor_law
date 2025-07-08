@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
-"""
-AI-Powered Web Crawler for AI Document Assistant
-Uses OpenAI GPT to intelligently navigate websites and process content before database storage
+"""AI-Powered Web Crawler for Labor Laws Content Extraction
+Uses OpenAI GPT to intelligently navigate https://www.usa.gov/labor-laws and process labor law content before database storage
 """
 
 import requests
@@ -33,9 +32,9 @@ class AIContentProcessor:
     
     def is_page_relevant(self, url: str, title: str, content: str, target_domain: str) -> bool:
         """
-        Use AI to determine if a page contains substantive immigration law knowledge.
+        Use AI to determine if a page contains substantive labor law knowledge.
         Returns True only if the content contains actual legal information, procedures, 
-        or guidance that would be useful for immigration lawyers helping citizenship applicants.
+        or guidance that would be useful for workers or employers regarding labor laws.
         """
         try:
             # First, do a quick content check to filter out obvious non-content
@@ -47,7 +46,7 @@ class AIContentProcessor:
                 'multilingual resources', 'sign in', 'create account',
                 'menu', 'close menu', 'breadcrumb', 'return to top',
                 'facebook', 'twitter', 'youtube', 'instagram', 'linkedin',
-                'email', 'contact uscis', 'privacy policy', 'terms of use',
+                'email', 'contact', 'privacy policy', 'terms of use',
                 'accessibility', 'freedom of information act', 'no fear act',
                 'inspector general', 'white house', 'usa.gov', 'vote.gov'
             ]):
@@ -58,14 +57,14 @@ class AIContentProcessor:
                 return False
             
             prompt = f"""
-            You are an expert immigration lawyer. Determine if this webpage contains SUBSTANTIVE legal information that would help you guide a client through the US citizenship process.
+            You are an expert in U.S. labor law. Determine if this webpage contains SUBSTANTIVE legal information that would help a worker or employer understand their rights, responsibilities, or procedures under U.S. labor law.
 
             ONLY answer YES if the page contains:
             - Specific legal requirements, procedures, or eligibility criteria
-            - Immigration law statutes, regulations, or policy guidance
-            - Step-by-step instructions for forms or processes
+            - Labor law statutes, regulations, or policy guidance
+            - Step-by-step instructions for labor law processes
             - Legal definitions, interpretations, or clarifications
-            - Official policy memos, field guidance, or legal precedents
+            - Official policy, field guidance, or legal precedents
             - Specific eligibility requirements, time periods, or qualifications
             - Legal consequences, penalties, or rights
             - Official procedures, timelines, or processes
@@ -102,7 +101,7 @@ class AIContentProcessor:
 class AIWebCrawler:
     def __init__(self, output_dir: str = "crawled_data", delay: float = 2.0, max_pages: int = 30):
         """
-        Initialize the AI-powered web crawler
+        Initialize the AI-powered web crawler for labor laws
         
         Args:
             output_dir: Directory to save processed content
@@ -209,7 +208,7 @@ class AIWebCrawler:
         content = re.sub(r'\s+', ' ', content.strip())
         
         # Remove common navigation and non-content text
-        content = re.sub(r'(Skip to main content|U\.S\. flag|Official Government Website|Secure Website|Español|Multilingual Resources|Sign In|Create Account|Menu|Close menu|Breadcrumb|Return to top|Facebook|X, formerly known as Twitter|YouTube|Instagram|LinkedIn|Email|Contact USCIS|U\.S\. Department of Homeland Security Seal|Agency description|Important links|Looking for U\.S\. government information and services\?|Visit USA\.gov|Was this page helpful\?|Yes|No|This page was not helpful because the content|Select a reason|has too little information|has too much information|is confusing|is out of date|other|How can the content be improved\?|To protect your privacy, please do not include any personal information in your feedback|Review our Privacy Policy|RSS Feed|Subscribe|Follow us|Share this page|Print this page|Download|PDF|Word|Excel|PowerPoint|Accessibility|Privacy Policy|Terms of Use|Freedom of Information Act|No Fear Act|Inspector General|White House|USA\.gov|Vote\.gov)', '', content, flags=re.IGNORECASE)
+        content = re.sub(r'(Skip to main content|U\.S\. flag|Official Government Website|Secure Website|Español|Multilingual Resources|Sign In|Create Account|Menu|Close menu|Breadcrumb|Return to top|Facebook|X, formerly known as Twitter|YouTube|Instagram|LinkedIn|Email|Contact|Agency description|Important links|Looking for U\.S\. government information and services\?|Visit USA\.gov|Was this page helpful\?|Yes|No|This page was not helpful because the content|Select a reason|has too little information|has too much information|is confusing|is out of date|other|How can the content be improved\?|To protect your privacy, please do not include any personal information in your feedback|Review our Privacy Policy|RSS Feed|Subscribe|Follow us|Share this page|Print this page|Download|PDF|Word|Excel|PowerPoint|Accessibility|Privacy Policy|Terms of Use|Freedom of Information Act|No Fear Act|Inspector General|White House|USA\.gov|Vote\.gov)', '', content, flags=re.IGNORECASE)
         
         # Remove very short lines that are likely navigation
         lines = [line.strip() for line in content.split('\n') if len(line.strip()) > 20]
@@ -312,7 +311,7 @@ class AIWebCrawler:
         return str(txt_filepath)
 
 def main():
-    parser = argparse.ArgumentParser(description="AI-Powered Web Crawler for Immigration Law Content")
+    parser = argparse.ArgumentParser(description="AI-Powered Web Crawler for U.S. Labor Laws Content")
     parser.add_argument("--output", "-o", default="crawled_data", help="Output directory")
     parser.add_argument("--delay", "-d", type=float, default=2.0, help="Delay between requests (seconds)")
     parser.add_argument("--max-pages", "-m", type=int, default=30, help="Maximum pages to crawl")
@@ -326,16 +325,16 @@ def main():
         max_pages=args.max_pages
     )
     
-    # USCIS Laws and Policy URL
-    uscis_url = "https://www.uscis.gov/laws-and-policy"
-    site_name = "uscis_laws_policy"
+    # USA.gov Labor Laws URL
+    start_url = "https://www.usa.gov/labor-laws"
+    site_name = "usa_gov_labor_laws"
     
     try:
-        logger.info(f"🚀 Starting AI-powered crawl of USCIS Laws and Policy")
+        logger.info(f"🚀 Starting AI-powered crawl of {site_name}")
         logger.info(f"🧠 Using AI for intelligent navigation and content processing")
         logger.info(f"📊 Target: Up to {args.max_pages} pages with AI analysis")
         
-        pages = crawler.intelligent_crawl(uscis_url, site_name)
+        pages = crawler.intelligent_crawl(start_url, site_name)
         
         if pages:
             filepath = crawler.save_processed_content(pages, site_name)
@@ -345,7 +344,7 @@ def main():
             logger.info(f"📈 Results: {len(pages)} pages, {total_chars:,} characters")
             logger.info(f"💾 RAG-ready content saved to: {filepath}")
         else:
-            logger.warning(f"⚠️ No content found for USCIS")
+            logger.warning(f"⚠️ No content found for {site_name}")
             
     except Exception as e:
         logger.error(f"❌ Error in AI-powered crawl: {e}")
