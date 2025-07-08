@@ -23,7 +23,7 @@ A powerful document processing and question-answering system built with Python. 
 
 ### 1. Clone the Repository
 ```bash
-git clone https://github.com/NamNhiBinhHipHop/chatbot.git
+git clone https://github.com/HuyAT210/chatbot_labor_law.git
 cd chatbot
 ```
 
@@ -64,13 +64,13 @@ python cli_app.py --interactive
 #### Single Commands
 ```bash
 # Ask a question
-python cli_app.py --ask "What are the requirements for naturalization?"
+python cli_app.py --ask "What is the minimum wage"
 
 # Upload a document
-python cli_app.py --upload "path/to/document.pdf"
+python cli_app.py --upload "path/to/document.pdf" 
 
 # Search for content
-python cli_app.py --search "immigration law"
+python cli_app.py --search "labor_law"
 
 # List all documents
 python cli_app.py --list
