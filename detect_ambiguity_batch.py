@@ -11,76 +11,75 @@ from config.config import OPENAI_API_KEY
 OUTPUT_DIR = 'suspicious_summaries'
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-CHUNK_SIZE = 700  # chars
-OVERLAP = 1  # sentences
 MILVUS_MAX_CHUNK_BYTES = 1000
-OPENAI_MODEL = 'gpt-3.5-turbo'
+OPENAI_MODEL = 'gpt-4o-mini'
 
 client = openai.OpenAI(api_key=OPENAI_API_KEY)
 
-def split_long_chunk_bytes(chunk, max_bytes=MILVUS_MAX_CHUNK_BYTES):
+# --- Function schemas for OpenAI tool calling ---
+openai_functions = [
+    {
+        "type": "function",
+        "function": {
+            "name": "multi_milvus_query",
+            "description": "Search the law database for relevant legal context using one or more queries.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "queries": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "A list of law-related queries to search for."
+                    },
+                    "top_k": {
+                        "type": "integer",
+                        "description": "Number of top results to return per query.",
+                        "default": 5
+                    }
+                },
+                "required": ["queries"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "search_contract_context",
+            "description": "Search the contract context database for relevant content.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "The contract-related query to search for."},
+                    "top_k": {"type": "integer", "description": "Number of top results to return.", "default": 3}
+                },
+                "required": ["query"]
+            }
+        }
+    }
+]
+
+def split_document_into_sentences(text):
     nltk.download('punkt', quiet=True)
-    sentences = nltk.sent_tokenize(chunk)
-    sub_chunks = []
-    current = ''
+    sentences = nltk.sent_tokenize(text)
+    # Ensure no sentence exceeds Milvus byte limit
+    safe_sentences = []
     for sent in sentences:
-        if len(sent.encode('utf-8')) > max_bytes:
+        if len(sent.encode('utf-8')) <= MILVUS_MAX_CHUNK_BYTES:
+            safe_sentences.append(sent)
+        else:
+            # Split long sentence by bytes
             temp = ''
             for char in sent:
-                if len((temp + char).encode('utf-8')) > max_bytes:
-                    sub_chunks.append(temp)
+                if len((temp + char).encode('utf-8')) > MILVUS_MAX_CHUNK_BYTES:
+                    safe_sentences.append(temp)
                     temp = char
                 else:
                     temp += char
             if temp:
-                sub_chunks.append(temp)
-            if current:
-                sub_chunks.append(current)
-                current = ''
-        elif len((current + (' ' if current else '') + sent).encode('utf-8')) <= max_bytes:
-            if current:
-                current += ' '
-            current += sent
-        else:
-            if current:
-                sub_chunks.append(current)
-            current = sent
-    if current:
-        sub_chunks.append(current)
-    really_safe_chunks = []
-    for c in sub_chunks:
-        if len(c.encode('utf-8')) <= max_bytes:
-            really_safe_chunks.append(c)
-        else:
-            temp = ''
-            for char in c:
-                if len((temp + char).encode('utf-8')) > max_bytes:
-                    really_safe_chunks.append(temp)
-                    temp = char
-                else:
-                    temp += char
-            if temp:
-                really_safe_chunks.append(temp)
-    return really_safe_chunks
+                safe_sentences.append(temp)
+    return safe_sentences
 
-def enforce_max_chunk_byte_length(chunks, max_bytes=MILVUS_MAX_CHUNK_BYTES):
-    safe_chunks = []
-    for chunk in chunks:
-        if len(chunk.encode('utf-8')) <= max_bytes:
-            safe_chunks.append(chunk)
-        else:
-            safe_chunks.extend(split_long_chunk_bytes(chunk, max_bytes))
-    for c in safe_chunks:
-        assert len(c.encode('utf-8')) <= max_bytes, f"Chunk byte length {len(c.encode('utf-8'))} exceeds max {max_bytes}"
-    return safe_chunks
-
-# --- Multi-query function for Milvus law database ---
 def multi_milvus_query(queries, top_k=5):
-    """
-    Given a list of law-related queries, return the top_k most relevant law context results for each query from the Milvus law database.
-    The quality and specificity of your queries will directly impact the usefulness of the legal context you receive.
-    Returns a dict: {query: [chunks]}
-    """
     results = {}
     for q in queries:
         refs = search_similar_chunks(q, top_k=top_k)
@@ -103,36 +102,36 @@ def process_file_with_llm(file_path: Path):
         print(f"No text extracted from {file_path.name}")
         return
 
-    # Split contract into chunks
-    chunks = split_into_sentence_chunks(text, target_chunk_size=CHUNK_SIZE, overlap_sentences=OVERLAP)
-    chunks = enforce_max_chunk_byte_length(chunks, MILVUS_MAX_CHUNK_BYTES)
-    print(f"{file_path.name}: {len(chunks)} chunks")
+    # Split contract into sentences
+    sentences = split_document_into_sentences(text)
+    print(f"{file_path.name}: {len(sentences)} sentences")
 
     out_path = Path(OUTPUT_DIR) / f"{file_path.stem}_{session_id}.md"
     with open(out_path, 'w', encoding='utf-8') as f:
         f.write(f"# Ambiguity & Law Violation Summary for {file_path.name}\n\n")
         f.write(f"**Session ID:** {session_id}\n\n")
 
-    for idx, chunk in enumerate(chunks):
-        print(f"Processing chunk {idx+1}/{len(chunks)}...")
+    for idx, sentence in enumerate(sentences):
+        print(f"Processing sentence {idx+1}/{len(sentences)}...")
         system_prompt = (
             """
 You are a legal expert tasked with reviewing contract clauses for ambiguity or potential violations of labor law.
 
 Your primary goal is to determine, for each contract excerpt, whether it is ambiguous or violates any law. To do this, you should:
 
-- Use MULTI_QUERY_LAW: [<query1>, <query2>, ...] to search the law database for relevant legal context. You may request multiple law queries in a single response. The quality and specificity of your questions to the law database (Milvus) are critical: well-formed, precise queries will yield much more useful legal context and lead to a better legal analysis.
-- Only use QUERY_CONTRACT: <query> to search the previous contract content if you genuinely need to recall a definition or earlier clause that is not present in your current context (for example, if you have forgotten a term or need to check a cross-reference).
+- Use the available tools to search the law database (multi_milvus_query) for relevant legal context. You may request multiple law queries in a single tool call. The quality and specificity of your questions to the law database (Milvus) are critical: well-formed, precise queries will yield much more useful legal context and lead to a better legal analysis.
+- Only use the contract context search tool (search_contract_context) if you genuinely need to recall a definition or earlier clause that is not present in your current context (for example, if you have forgotten a term or need to check a cross-reference).
 
 **Instructions:**
-- Do NOT reply with acknowledgments, requests for time, or meta-comments. Begin your legal analysis and queries immediately.
-- You may issue MULTI_QUERY_LAW or QUERY_CONTRACT as many times as needed. When you have enough information, reply with FINAL ANSWER: <your clear, concise, and referenced legal explanation and decision>.
+- Do NOT reply with acknowledgments, requests for time, or meta-comments. Begin your legal analysis and tool calls immediately.
+- You may issue tool calls as many times as needed. When you have enough information, reply with FINAL ANSWER: <your clear, concise, and referenced legal explanation and decision>.
+- Do NOT output tool calls as your final answer. Only use these to request information, and always finish with FINAL ANSWER: ...
 - Your final answer should be professional, reference the law context you found, and be easy to understand for a non-lawyer.
             """
         )
         messages = [
             {"role": "system", "content": system_prompt},
-            {"role": "user", "content": f"CONTRACT EXCERPT:\n{chunk}\n\nBegin your legal analysis and queries as instructed above."}
+            {"role": "user", "content": f"CONTRACT EXCERPT:\n{sentence}\n\nBegin your legal analysis and queries as instructed above."}
         ]
         answer = None
         while True:
@@ -140,43 +139,63 @@ Your primary goal is to determine, for each contract excerpt, whether it is ambi
                 model=OPENAI_MODEL,
                 messages=messages,
                 temperature=0.0,
-                max_tokens=512
+                max_tokens=10000,
+                tools=openai_functions,
+                tool_choice="auto"
             )
-            content = response.choices[0].message.content.strip()
-            if content.startswith("MULTI_QUERY_LAW:"):
-                # Parse queries from the format MULTI_QUERY_LAW: [q1, q2, ...]
-                import ast
-                queries_str = content[len("MULTI_QUERY_LAW:"):].strip()
-                try:
-                    queries = ast.literal_eval(queries_str)
-                    if not isinstance(queries, list):
-                        queries = [queries]
-                except Exception:
-                    queries = [queries_str]
-                law_results = multi_milvus_query(queries, top_k=5)
-                context_text = '\n\n'.join([f"Query: {q}\n" + '\n'.join(law_results[q]) for q in law_results])
-                messages.append({"role": "assistant", "content": content})
-                messages.append({"role": "user", "content": f"LAW CONTEXT RESULT:\n{context_text}"})
-            elif content.startswith("QUERY_CONTRACT:"):
-                query = content[len("QUERY_CONTRACT:"):].strip()
-                contract_context = search_contract_context(query, top_k=3)
-                context_text = '\n'.join([ref['chunk'] for ref in contract_context])
-                messages.append({"role": "assistant", "content": content})
-                messages.append({"role": "user", "content": f"CONTRACT CONTEXT RESULT:\n{context_text}"})
-            elif content.startswith("FINAL ANSWER:"):
+            msg = response.choices[0].message
+            content = msg.content.strip() if msg.content else ""
+            # Handle tool calls
+            if msg.tool_calls:
+                tool_messages = []
+                import json
+                for tool_call in msg.tool_calls:
+                    if tool_call.function.name == "multi_milvus_query":
+                        params = json.loads(tool_call.function.arguments)
+                        queries = params["queries"]
+                        top_k = params.get("top_k", 5)
+                        law_results = multi_milvus_query(queries, top_k=top_k)
+                        context_text = '\n\n'.join([f"Query: {q}\n" + '\n'.join(law_results[q]) for q in law_results])
+                        tool_messages.append({
+                            "role": "tool",
+                            "tool_call_id": tool_call.id,
+                            "name": "multi_milvus_query",
+                            "content": context_text
+                        })
+                    elif tool_call.function.name == "search_contract_context":
+                        params = json.loads(tool_call.function.arguments)
+                        query = params["query"]
+                        top_k = params.get("top_k", 3)
+                        contract_context = search_contract_context(query, top_k=top_k)
+                        context_text = '\n'.join([ref['chunk'] for ref in contract_context])
+                        tool_messages.append({
+                            "role": "tool",
+                            "tool_call_id": tool_call.id,
+                            "name": "search_contract_context",
+                            "content": context_text
+                        })
+                messages.append({"role": "assistant", "content": content, "tool_calls": msg.tool_calls})
+                messages.extend(tool_messages)
+                continue  # Continue the loop to let the LLM process the tool results
+            # Handle final answer
+            if content.upper().startswith("FINAL ANSWER:"):
                 answer = content[len("FINAL ANSWER:"):].strip()
                 break
-            else:
-                answer = content
-                break
-        with open(out_path, 'a', encoding='utf-8') as f:
-            f.write(f"## Chunk {idx+1}\n\n")
-            f.write(f"**Chunk Text:**\n\n{chunk}\n\n")
-            f.write(f"**LLM Explanation:**\n\n{answer}\n\n---\n\n")
-        if len(chunk.encode('utf-8')) > MILVUS_MAX_CHUNK_BYTES:
-            print(f"[FATAL] About to insert chunk of byte length {len(chunk.encode('utf-8'))}: {chunk[:60]}...")
-            raise ValueError("Chunk too long in bytes!")
-        save_to_contract_context([chunk], file_path.name)
+            # Otherwise, treat as answer
+            answer = content
+            break
+        # Only write after the loop, when answer is final
+        if answer:
+            with open(out_path, 'a', encoding='utf-8') as f:
+                f.write(f"## Sentence {idx+1}\n\n")
+                f.write(f"**Sentence Text:**\n\n{sentence}\n\n")
+                f.write(f"**LLM Explanation:**\n\n{answer}\n\n---\n\n")
+        else:
+            print(f"[WARNING] Skipping output for sentence {idx+1} because LLM did not provide a final answer.")
+        if len(sentence.encode('utf-8')) > MILVUS_MAX_CHUNK_BYTES:
+            print(f"[FATAL] About to insert sentence of byte length {len(sentence.encode('utf-8'))}: {sentence[:60]}...")
+            raise ValueError("Sentence too long in bytes!")
+        save_to_contract_context([sentence], file_path.name)
 
     print(f"\n✅ Done. See {out_path}")
 
