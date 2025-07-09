@@ -38,6 +38,23 @@ if not collection.has_index():  # Check if index exists
     index_time = time.time() - index_start
     print(f"✅ Index created in {index_time:.2f} seconds")
 
+# --- SECOND COLLECTION FOR CONTRACT CONTEXT ---
+contract_context_collection = Collection("contract_context", schema=schema)
+
+if not contract_context_collection.has_index():
+    print("🕒 Creating index for contract_context...")
+    index_start = time.time()
+    contract_context_collection.create_index(
+        field_name="embedding",
+        index_params={
+            "index_type": "IVF_SQ8",
+            "metric_type": "IP",
+            "params": {"nlist": 1024}
+        }
+    )
+    index_time = time.time() - index_start
+    print(f"✅ Index for contract_context created in {index_time:.2f} seconds")
+
 def save_to_milvus(chunks: list[str], filename: str, vectors: list[list[float]] | None = None):
     """
     Save text chunks and their vectors to Milvus. Each chunk gets a unique ID.
@@ -94,6 +111,55 @@ def search_similar_chunks(query: str, top_k: int = 1000):
 
     search_time = time.time() - start_time
     print(f"⏱️ Search completed in {search_time:.2f} seconds")
+    return matches
+
+# --- CONTRACT CONTEXT COLLECTION UTILS ---
+def save_to_contract_context(chunks: list[str], filename: str, vectors: list[list[float]] | None = None):
+    """
+    Save contract chunks and their vectors to the contract_context collection.
+    """
+    # HARD CHECK: Print and raise error if any chunk is too long
+    for i, c in enumerate(chunks):
+        if len(c) > 1000:
+            print(f"[FATAL] About to insert chunk {i} of length {len(c)}: {c[:60]}...")
+            raise ValueError(f"Chunk {i} too long: {len(c)} chars")
+    print(f"[DEBUG] Inserting {len(chunks)} chunks. Lengths: {[len(c) for c in chunks]}")
+    start_time = time.time()
+    if vectors is None:
+        vectors = embed_chunks(chunks)
+    ids = [str(uuid.uuid4()) for _ in chunks]
+    filenames = [filename]*len(chunks)
+    contract_context_collection.insert([ids, filenames, chunks, vectors])
+    if len(chunks) <= 10:
+        contract_context_collection.flush()
+    save_time = time.time() - start_time
+    print(f"✅ Saved {len(chunks)} chunks to contract_context in {save_time:.2f} seconds")
+
+def search_contract_context(query: str, top_k: int = 5):
+    """
+    Embed the query and find the top_k most similar contract context chunks.
+    """
+    start_time = time.time()
+    query_vectors = embed_chunks([query])
+    if not query_vectors:
+        raise ValueError("Failed to generate embedding for query")
+    query_vector = query_vectors[0]
+    contract_context_collection.load()
+    results = contract_context_collection.search(
+        data=[query_vector],
+        anns_field="embedding",
+        param={"metric_type": "IP", "params": {"nprobe": 32}},
+        limit=top_k,
+        output_fields=["chunk"]
+    )
+    matches = []
+    for hit in results[0]:
+        matches.append({
+            "score": hit.score,
+            "chunk": hit.entity.get("chunk")
+        })
+    search_time = time.time() - start_time
+    print(f"⏱️ Contract context search completed in {search_time:.2f} seconds")
     return matches
     
 def delete_file(filename: str):

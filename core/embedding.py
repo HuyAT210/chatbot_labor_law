@@ -1,4 +1,5 @@
 from sentence_transformers import SentenceTransformer
+import nltk
 from typing import List
 import time
 
@@ -25,6 +26,32 @@ def split_into_chunks(text: str, size: int = CHUNK_SIZE, overlap: int = CHUNK_OV
         chunk = text[start:end]
         chunks.append(chunk.strip())
         start += size - overlap
+    return chunks
+
+def split_into_sentence_chunks(text: str, target_chunk_size: int = 700, overlap_sentences: int = 1) -> List[str]:
+    """
+    Split text into chunks at sentence boundaries, aiming for target_chunk_size (in chars).
+    Each chunk contains whole sentences and may overlap by a number of sentences.
+    """
+    nltk.download('punkt', quiet=True)
+    sentences = nltk.sent_tokenize(text)
+    chunks = []
+    current_chunk = []
+    current_len = 0
+    for sent in sentences:
+        if current_len + len(sent) > target_chunk_size and current_chunk:
+            chunks.append(' '.join(current_chunk))
+            # Overlap: keep last N sentences
+            if overlap_sentences > 0:
+                current_chunk = current_chunk[-overlap_sentences:]
+                current_len = sum(len(s) for s in current_chunk)
+            else:
+                current_chunk = []
+                current_len = 0
+        current_chunk.append(sent)
+        current_len += len(sent)
+    if current_chunk:
+        chunks.append(' '.join(current_chunk))
     return chunks
 
 def embed_chunks(chunks: List[str]) -> List[List[float]]:
