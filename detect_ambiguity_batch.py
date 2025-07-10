@@ -1,8 +1,8 @@
 import os
 from pathlib import Path
 from cli_app import extract_text_from_pdf, extract_text_from_txt
-from core.embedding import split_into_sentence_chunks
 from core.milvus_utilis import search_similar_chunks, save_to_contract_context, search_contract_context
+from core.milvus_utilis import delete_all_contract_context
 import datetime
 import nltk
 import openai
@@ -45,14 +45,18 @@ openai_functions = [
         "type": "function",
         "function": {
             "name": "search_contract_context",
-            "description": "Search the contract context database for relevant content.",
+            "description": "Search the contract context database for relevant content using multiple queries to find contract clauses, terms, or definitions that may be referenced in the current analysis.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "query": {"type": "string", "description": "The contract-related query to search for."},
-                    "top_k": {"type": "integer", "description": "Number of top results to return.", "default": 3}
+                    "queries": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "A list of contract-related queries to search for, such as term definitions, clause references, or related contract sections."
+                    },
+                    "top_k": {"type": "integer", "description": "Number of top results to return per query.", "default": 3}
                 },
-                "required": ["query"]
+                "required": ["queries"]
             }
         }
     }
@@ -115,76 +119,109 @@ def process_file_with_llm(file_path: Path):
         print(f"Processing sentence {idx+1}/{len(sentences)}...")
         system_prompt = (
             """
-You are a legal expert tasked with reviewing contract clauses for ambiguity or potential violations of labor law.
+You are a legal compliance checker reviewing contract clauses to detect **clear, unambiguous violations of labor law or employment standards**.  
+You must focus ONLY on contract sentences that clearly break the law.
 
-Your primary goal is to determine, for each contract excerpt, whether it is ambiguous or violates any law. To do this, you should:
+⚠️ **CRITICAL**: You must provide a definitive answer. If the violation is unclear, uncertain, or requires additional context, you MUST respond with `NO CLEAR VIOLATION.`
 
-- Use the available tools to search the law database (multi_milvus_query) for relevant legal context. You may request multiple law queries in a single tool call. The quality and specificity of your questions to the law database (Milvus) are critical: well-formed, precise queries will yield much more useful legal context and lead to a better legal analysis.
-- Only use the contract context search tool (search_contract_context) if you genuinely need to recall a definition or earlier clause that is not present in your current context (for example, if you have forgotten a term or need to check a cross-reference).
+For each contract excerpt:
+- If the sentence clearly violates a labor law or mandatory employment regulation, give a **short, clear explanation of the violation in plain English**.
+- If there is any ambiguity, uncertainty, or lack of clear violation, respond: `NO CLEAR VIOLATION.`
 
-**Instructions:**
-- Do NOT reply with acknowledgments, requests for time, or meta-comments. Begin your legal analysis and tool calls immediately.
-- You may issue tool calls as many times as needed. When you have enough information, reply with FINAL ANSWER: <your clear, concise, and referenced legal explanation and decision>.
-- Do NOT output tool calls as your final answer. Only use these to request information, and always finish with FINAL ANSWER: ...
-- Your final answer should be professional, reference the law context you found, and be easy to understand for a non-lawyer.
-            """
+**Available tools (use as needed):**
+- **multi_milvus_query**: Search for relevant legal rules and examples to confirm if something is illegal
+- **search_contract_context**: Search for contract clauses, term definitions, or related sections that may be referenced
+
+**Important:** You can use both tools, just one, or none at all in a single response. After using any tools, provide your final analysis.
+
+**Output format:**  
+You MUST start your final answer with: `FINAL ANSWER:` followed by your short explanation.  
+Example:  
+`FINAL ANSWER: This clause violates the Fair Labor Standards Act by failing to pay overtime.`  
+or  
+`FINAL ANSWER: NO CLEAR VIOLATION.`
+
+🚫 Do not provide background explanations, summaries of the contract, or meta-comments.  
+🚫 Do not speculate about potential issues or "may" scenarios.  
+✅ Only give your conclusion about whether this sentence violates the law.
+
+Begin your legal analysis now. Use tools if needed, then provide your final answer.
+   """
         )
         messages = [
             {"role": "system", "content": system_prompt},
-            {"role": "user", "content": f"CONTRACT EXCERPT:\n{sentence}\n\nBegin your legal analysis and queries as instructed above."}
+            {"role": "user", "content": f"CONTRACT EXCERPT:\n{sentence}\n\nBegin your legal analysis now. Use tools if needed, then provide your final answer."}
         ]
-        answer = None
-        while True:
-            response = client.chat.completions.create(
+        
+        response = client.chat.completions.create(
+            model=OPENAI_MODEL,
+            messages=messages,
+            temperature=0.0,
+            max_tokens=10000,
+            tools=openai_functions,
+            tool_choice="auto"
+        )
+        
+        msg = response.choices[0].message
+        content = msg.content.strip() if msg.content else ""
+        
+        # Handle tool calls if present
+        if msg.tool_calls:
+            tool_messages = []
+            import json
+            for tool_call in msg.tool_calls:
+                if tool_call.function.name == "multi_milvus_query":
+                    params = json.loads(tool_call.function.arguments)
+                    queries = params["queries"]
+                    top_k = params.get("top_k", 5)
+                    law_results = multi_milvus_query(queries, top_k=top_k)
+                    context_text = '\n\n'.join([f"Query: {q}\n" + '\n'.join(law_results[q]) for q in law_results])
+                    tool_messages.append({
+                        "role": "tool",
+                        "tool_call_id": tool_call.id,
+                        "name": "multi_milvus_query",
+                        "content": context_text
+                    })
+                elif tool_call.function.name == "search_contract_context":
+                    params = json.loads(tool_call.function.arguments)
+                    queries = params["queries"]
+                    top_k = params.get("top_k", 3)
+                    contract_context_results = search_contract_context(queries, top_k=top_k)
+                    # Combine all results from all queries
+                    all_context_chunks = []
+                    for query, results in contract_context_results.items():
+                        all_context_chunks.append(f"Query: {query}")
+                        all_context_chunks.extend([ref['chunk'] for ref in results])
+                    context_text = '\n\n'.join(all_context_chunks)
+                    tool_messages.append({
+                        "role": "tool",
+                        "tool_call_id": tool_call.id,
+                        "name": "search_contract_context",
+                        "content": context_text
+                    })
+            
+            # Add tool results and get final response
+            messages.append({"role": "assistant", "content": content, "tool_calls": msg.tool_calls})
+            messages.extend(tool_messages)
+            
+            # Get final response after tool calls
+            final_response = client.chat.completions.create(
                 model=OPENAI_MODEL,
                 messages=messages,
                 temperature=0.0,
-                max_tokens=10000,
-                tools=openai_functions,
-                tool_choice="auto"
+                max_tokens=10000
             )
-            msg = response.choices[0].message
-            content = msg.content.strip() if msg.content else ""
-            # Handle tool calls
-            if msg.tool_calls:
-                tool_messages = []
-                import json
-                for tool_call in msg.tool_calls:
-                    if tool_call.function.name == "multi_milvus_query":
-                        params = json.loads(tool_call.function.arguments)
-                        queries = params["queries"]
-                        top_k = params.get("top_k", 5)
-                        law_results = multi_milvus_query(queries, top_k=top_k)
-                        context_text = '\n\n'.join([f"Query: {q}\n" + '\n'.join(law_results[q]) for q in law_results])
-                        tool_messages.append({
-                            "role": "tool",
-                            "tool_call_id": tool_call.id,
-                            "name": "multi_milvus_query",
-                            "content": context_text
-                        })
-                    elif tool_call.function.name == "search_contract_context":
-                        params = json.loads(tool_call.function.arguments)
-                        query = params["query"]
-                        top_k = params.get("top_k", 3)
-                        contract_context = search_contract_context(query, top_k=top_k)
-                        context_text = '\n'.join([ref['chunk'] for ref in contract_context])
-                        tool_messages.append({
-                            "role": "tool",
-                            "tool_call_id": tool_call.id,
-                            "name": "search_contract_context",
-                            "content": context_text
-                        })
-                messages.append({"role": "assistant", "content": content, "tool_calls": msg.tool_calls})
-                messages.extend(tool_messages)
-                continue  # Continue the loop to let the LLM process the tool results
-            # Handle final answer
-            if content.upper().startswith("FINAL ANSWER:"):
-                answer = content[len("FINAL ANSWER:"):].strip()
-                break
-            # Otherwise, treat as answer
+            final_content = final_response.choices[0].message.content.strip()
+            answer = final_content
+        else:
+            # No tool calls, use content directly
             answer = content
-            break
-        # Only write after the loop, when answer is final
+        
+        # Extract final answer if it starts with "FINAL ANSWER:"
+        if answer and answer.upper().startswith("FINAL ANSWER:"):
+            answer = answer[len("FINAL ANSWER:"):].strip()
+        
+        # Write results
         if answer:
             with open(out_path, 'a', encoding='utf-8') as f:
                 f.write(f"## Sentence {idx+1}\n\n")
@@ -198,6 +235,7 @@ Your primary goal is to determine, for each contract excerpt, whether it is ambi
         save_to_contract_context([sentence], file_path.name)
 
     print(f"\n✅ Done. See {out_path}")
+    # Reset contract context collection after processing
 
 def main():
     file_path_str = input("Enter the path to the file you want to analyze (e.g., 'testing files/contract.txt'): ,WITHOUT QUOTES : ").strip()
@@ -205,6 +243,7 @@ def main():
     if not file_path.exists():
         print(f"File not found: {file_path}")
         return
+    delete_all_contract_context()
     process_file_with_llm(file_path)
 
 if __name__ == '__main__':
