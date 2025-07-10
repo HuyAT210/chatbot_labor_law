@@ -135,32 +135,44 @@ def save_to_contract_context(chunks: list[str], filename: str, vectors: list[lis
     save_time = time.time() - start_time
     print(f"✅ Saved {len(chunks)} chunks to contract_context in {save_time:.2f} seconds")
 
-def search_contract_context(query: str, top_k: int = 5):
+def search_contract_context(queries: list[str], top_k: int = 5):
     """
-    Embed the query and find the top_k most similar contract context chunks.
+    Embed multiple queries and find the top_k most similar contract context chunks for each query.
+    Returns a dictionary with query as key and list of matches as value.
     """
     start_time = time.time()
-    query_vectors = embed_chunks([query])
+    
+    # Get embeddings for all queries
+    query_vectors = embed_chunks(queries)
     if not query_vectors:
-        raise ValueError("Failed to generate embedding for query")
-    query_vector = query_vectors[0]
+        raise ValueError("Failed to generate embeddings for queries")
+    
     contract_context_collection.load()
-    results = contract_context_collection.search(
-        data=[query_vector],
-        anns_field="embedding",
-        param={"metric_type": "IP", "params": {"nprobe": 32}},
-        limit=top_k,
-        output_fields=["chunk"]
-    )
-    matches = []
-    for hit in results[0]:
-        matches.append({
-            "score": hit.score,
-            "chunk": hit.entity.get("chunk")
-        })
+    
+    # Search for each query
+    all_results = {}
+    for i, query in enumerate(queries):
+        query_vector = query_vectors[i]
+        results = contract_context_collection.search(
+            data=[query_vector],
+            anns_field="embedding",
+            param={"metric_type": "IP", "params": {"nprobe": 32}},
+            limit=top_k,
+            output_fields=["chunk"]
+        )
+        
+        matches = []
+        for hit in results[0]:
+            matches.append({
+                "score": hit.score,
+                "chunk": hit.entity.get("chunk")
+            })
+        
+        all_results[query] = matches
+    
     search_time = time.time() - start_time
-    print(f"⏱️ Contract context search completed in {search_time:.2f} seconds")
-    return matches
+    print(f"⏱️ Contract context search completed in {search_time:.2f} seconds for {len(queries)} queries")
+    return all_results
     
 def delete_file(filename: str):
     """
@@ -212,4 +224,33 @@ def delete_all():
         print(f"❌ Error deleting all data: {e}")
         return {
             "message": f"❌ Error deleting all data: {e}"
+        }
+
+def delete_all_contract_context():
+    """
+    Delete all data from the contract_context Milvus collection.
+    """
+    try:
+        contract_context_collection.load()
+        results = contract_context_collection.query(
+            expr="id != ''",
+            output_fields=["id"],
+            limit=10000
+        )
+        if not results:
+            print("📭 No contract context data to delete - collection is already empty.")
+            return {
+                "message": "📭 No contract context data to delete - collection is already empty."
+            }
+        ids_to_delete = [r["id"] for r in results]
+        contract_context_collection.delete(expr=f"id in {ids_to_delete}")
+        contract_context_collection.flush()
+        print(f"🗑️ Deleted {len(ids_to_delete)} records from contract_context collection.")
+        return {
+            "message": f"✅ Successfully deleted {len(ids_to_delete)} records from the contract_context database."
+        }
+    except Exception as e:
+        print(f"❌ Error deleting all contract context data: {e}")
+        return {
+            "message": f"❌ Error deleting all contract context data: {e}"
         }
