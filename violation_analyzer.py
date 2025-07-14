@@ -8,14 +8,14 @@ from config.config import QWEN_API_KEY, QWEN_API_URL, QWEN_MODEL
 def is_clear_violation(ai_response):
     """
     Check if the AI response indicates a clear violation.
-    
-    Args:
-        ai_response (str): The AI's response text
-        
-    Returns:
-        bool: True if clear violation, False if no clear violation
+    Returns False if 'NO CLEAR VIOLATION' appears anywhere in the response (case-insensitive), True otherwise.
     """
-    return ai_response.strip().upper() != "NO CLEAR VIOLATION."
+    cleaned = ai_response.strip().strip('`').strip()
+    # Remove 'FINAL ANSWER:' prefix if present
+    if cleaned.upper().startswith("FINAL ANSWER:"):
+        cleaned = cleaned[len("FINAL ANSWER:"):].strip()
+    # Check for 'NO CLEAR VIOLATION' anywhere in the response (case-insensitive)
+    return "NO CLEAR VIOLATION" not in cleaned.upper()
 
 def generate_violation_summary(violations, contract_name):
     """
@@ -36,8 +36,9 @@ def generate_violation_summary(violations, contract_name):
     violation_text += "The following violations were found:\n\n"
     
     for i, violation in enumerate(violations, 1):
-        violation_text += f"{i}. Sentence: {violation['sentence']}\n"
-        violation_text += f"   Explanation: {violation['explanation']}\n\n"
+        sentence, explanation = violation
+        violation_text += f"{i}. Sentence: {sentence}\n"
+        violation_text += f"   Explanation: {explanation}\n\n"
     
     # Create prompt for Qwen
     system_prompt = """
@@ -71,7 +72,7 @@ Be concise but thorough. Focus on the most critical issues.
         "max_tokens": 10000
     }
     
-    response = requests.post(f"{QWEN_API_URL}/chat/completions", headers=headers, json=payload)
+    response = requests.post(QWEN_API_URL, headers=headers, json=payload)
     
     if response.status_code != 200:
         raise Exception(f"Qwen API error: {response.status_code} - {response.text}")
