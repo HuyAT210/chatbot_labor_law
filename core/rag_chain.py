@@ -1,5 +1,5 @@
 """
-Deep Search Model for Immigration QA
+Deep Search Model for Labor Law QA
 """
 
 from config.config import QWEN_API_URL, QWEN_API_KEY
@@ -27,13 +27,13 @@ def ask_llm(prompt: str) -> str:
     response.raise_for_status()
     return response.json()["choices"][0]["message"]["content"]
 
-# --- Immigration Domain Detection ---
-def is_immigration_related(query: str, chat_history: str = "") -> bool:
+# --- Labor Law Domain Detection ---
+def is_labor_law_related(query: str, chat_history: str = "") -> bool:
     prompt = f"""
 CHAT HISTORY:
 {chat_history}
 
-You are an expert classifier. Determine if the following user question is about US immigration or citizenship (including visas, green cards, naturalization, USCIS, etc).
+You are an expert classifier. Determine if the following user question is about labor law or employment law (including contracts, wages, working hours, workplace rights, termination, discrimination, etc).
 
 QUESTION: "{query}"
 
@@ -150,7 +150,7 @@ def check_answers_quality(questions: list, answers: list, original_query: str = 
 CHAT HISTORY:
 {chat_history}
 
-You are an expert immigration lawyer and legal reasoning agent. Your task is to analyze search results, identify relevant legal information, and determine if further research is needed to provide accurate immigration advice.
+You are an expert labor lawyer and legal reasoning agent. Your task is to analyze search results, identify relevant labor law information, and determine if further research is needed to provide accurate labor law advice.
 
 ORIGINAL QUERY: {original_query}
 
@@ -321,16 +321,16 @@ def clean_llm_response(text: str) -> str:
 
 # --- Main Deep Search Pipeline ---
 def deep_search_pipeline(query: str, chat_history: str = "") -> str:
-    if not is_immigration_related(query, chat_history=chat_history):
+    if not is_labor_law_related(query, chat_history=chat_history):
         prompt = f"""
 CHAT HISTORY:
 {chat_history}
 
-You are an expert immigration lawyer specialized in US immigration and citizenship. Your task is to give legal advice based on the original query.
+You are an expert labor lawyer specialized in labor and employment law. Your task is to give legal advice based on the original query.
 
 USER QUERY: {query}
 
-Please respond accordingly, if the user query is not related to immigration, please let them know.
+Please respond accordingly, if the user query is not related to labor law, please let them know.
 """
         direct_answer = ask_llm(prompt)
         return clean_llm_response(direct_answer)
