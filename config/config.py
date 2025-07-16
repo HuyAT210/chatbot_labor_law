@@ -4,11 +4,8 @@ from dotenv import load_dotenv
 # Load environment variables from .env file
 load_dotenv()
 
-LLM_API_URL = "https://api.openai.com/v1/chat/completions"
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
-
 # API Configuration
-QWEN_API_KEY = LLM_API_KEY = os.getenv('QWEN_API_KEY', '')
+QWEN_API_KEY = os.getenv('QWEN_API_KEY', '')
 QWEN_API_URL = os.getenv('QWEN_API_URL', 'https://vibe-agent-gateway.eternalai.org/v1')
 
 # Model Configuration

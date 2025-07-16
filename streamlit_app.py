@@ -6,7 +6,7 @@ import glob
 
 from detect_ambiguity_batch import process_file_with_llm
 from core.milvus_utilis import delete_all_contract_context
-from core.rag_chain import ask_question_smart_with_toolcall
+from core.rag_chain import ask_llm
 
 st.set_page_config(page_title="Contract Labor Law Analyzer", layout="wide")
 st.title("📄 Contract Labor Law Analyzer")
@@ -76,7 +76,7 @@ if submit_chat and user_input:
     with st.spinner("AI is thinking..."):
         try:
             import re
-            final_answer = ask_question_smart_with_toolcall(user_input)  # Direct output, no parsing
+            final_answer = ask_llm(user_input)  # Direct output, no parsing
             final_answer = re.sub(r'<think>.*?</think>', '', final_answer, flags=re.DOTALL)
             final_answer = re.sub(r'<think>.*?</think>', '', final_answer, flags=re.DOTALL)
         except Exception as e:
