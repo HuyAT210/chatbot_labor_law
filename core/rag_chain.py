@@ -10,6 +10,11 @@ import re
 
 # --- LLM API Call ---
 def ask_llm(prompt: str) -> str:
+    # Prepend US law restriction to all prompts
+    us_law_notice = (
+        "IMPORTANT: Your answer must be based ONLY on United States (US) labor and employment law. Do NOT reference or apply laws from other countries or jurisdictions (such as the EU, UK, or Canada).\n\n"
+    )
+    prompt = us_law_notice + prompt
     payload = {
         "model": "gpt-4",
         "messages": [

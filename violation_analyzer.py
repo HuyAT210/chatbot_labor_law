@@ -69,7 +69,7 @@ Be concise but thorough. Focus on the most critical issues.
         "model": QWEN_MODEL,
         "messages": messages,
         "temperature": 0.0,
-        "max_tokens": 10000
+        "max_tokens": 32000
     }
     
     response = requests.post(QWEN_API_URL, headers=headers, json=payload)
