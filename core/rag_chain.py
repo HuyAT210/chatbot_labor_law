@@ -47,7 +47,7 @@ Respond with ONLY YES or NO.
     try:
         response = ask_llm(prompt)
         answer = response.strip().upper()
-        return answer.startswith("YES")
+        return answer.endswith("YES")
     except Exception as e:
         print(f"⚠️ LLM classification error: {e}")
         return False
@@ -130,7 +130,7 @@ Example of CORRECT response format:
 
 # --- Semantic Search for Subquestions ---
 def ask_llm_with_context(query: str, chat_history: str = "") -> str:
-    results = search_similar_chunks(query, top_k=1000)
+    results = search_similar_chunks(query, top_k=10)
     if not results:
         return "No relevant information found."
     context = "\n".join([r["chunk"] for r in results])
@@ -234,9 +234,8 @@ IMPORTANT RULES:
 1. ONLY include information that is directly supported by the search context
 2. DO NOT make up or infer information not present in the search results
 3. If information is missing or unclear, note it as a limitation rather than making assumptions
-4. Clearly indicate which search results support each point using markdown hyperlinks
-5. Use direct quotes from search results when appropriate
-6. Maintain academic rigor and avoid speculation
+4. Use direct quotes from search results when appropriate
+5. Maintain academic rigor and avoid speculation
 
 Format your outline using proper markdown sections. THIS IS ONLY AN OUTLINE - do not write the full content.
 Make the outline detailed enough that a content writer can easily expand it into a complete, informative answer.
@@ -302,11 +301,10 @@ IMPORTANT RULES:
 1. ONLY include information that is directly supported by the search context
 2. DO NOT make up or infer information not present in the search results
 3. If information is missing or unclear, note it as a limitation rather than making assumptions
-4. Clearly cite sources for each piece of information using the syntax: \\cite{{$ID}} for each fact or claim, for all key_points, reasoning and knowledge_gaps. Where the $ID is mentioned in the SEARCH DETAILS and OUTLINE.
-5. Use direct quotes from search results when appropriate
-6. Maintain academic rigor and avoid speculation
-7. If the search context is insufficient to answer a point, clearly state this limitation
-8. Do not use phrases like "based on the search results" or "according to the information provided" - instead cite specific sources
+4. Use direct quotes from search results when appropriate
+5. Maintain academic rigor and avoid speculation
+6. If the search context is insufficient to answer a point, clearly state this limitation
+7. Do not use phrases like "based on the search results" or "according to the information provided"
 
 Your expanded answer should be thorough, informative, and directly address the original query,
 while carefully following the outline structure and maintaining strict adherence to the search context.
@@ -334,7 +332,7 @@ CHAT HISTORY:
 You are an expert labor lawyer specialized in labor and employment law. Your task is to give legal advice based on the original query.
 
 USER QUERY: {query}
-
+'
 Please respond accordingly, if the user query is not related to labor law, please let them know.
 """
         direct_answer = ask_llm(prompt)

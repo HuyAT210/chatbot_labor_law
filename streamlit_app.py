@@ -10,6 +10,7 @@ from detect_ambiguity_batch import process_file_with_llm
 from core.milvus_utilis import delete_all_contract_context
 from core.rag_chain import ask_llm
 from core.rag_chain import deep_search_pipeline
+from cli_app import extract_text_from_pdf, extract_text_from_txt
 
 st.set_page_config(page_title="Contract Labor Law Analyzer", layout="wide")
 st.title("📄 Contract Labor Law Analyzer")
@@ -60,15 +61,27 @@ user_contract_question = st.text_input(
 if uploaded_file:
     st.success(f"Uploaded: {uploaded_file.name}")
     if st.button("Analyze Contract", type="primary"):
-        with st.spinner("Analyzing contract for your question..."):
+        with st.spinner("Analyzing contract... This may take a moment."):
             delete_all_contract_context()  # Clear previous contract context
+            
             with tempfile.NamedTemporaryFile(delete=False, suffix=Path(uploaded_file.name).suffix) as tmp_file:
-                tmp_file.write(uploaded_file.read())
+                tmp_file.write(uploaded_file.getbuffer())
                 temp_path = Path(tmp_file.name)
 
-            # Pass the user's question to the backend analysis
-            from detect_ambiguity_batch import process_file_with_llm
+            # --- Automatic analysis mode selection ---
+            text = ""
+            try:
+                if temp_path.suffix.lower() == '.pdf':
+                    text = extract_text_from_pdf(str(temp_path))
+                elif temp_path.suffix.lower() == '.txt':
+                    text = extract_text_from_txt(str(temp_path))
+            except Exception as e:
+                st.error(f"Error extracting text from file: {e}")
+                st.stop()
+            
+            # The unified function will handle whether to chunk or not.
             process_file_with_llm(temp_path, user_question=user_contract_question)
+
             time.sleep(1)  # Ensure file is written
 
             base_stem = temp_path.stem

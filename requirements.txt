@@ -19,3 +19,9 @@ beautifulsoup4==4.12.2
 
 #sentence 
 nltk
+
+#interface
+streamlit==1.46.1
+
+#markdown
+markdown==3.8.2

@@ -72,6 +72,66 @@ def call_qwen_api(messages, tools=None, tool_choice="auto"):
     return response.json()
 
 
+def split_text_into_pages(text: str, page_size_chars: int = 4000) -> list[str]:
+    """
+    Splits a long text into smaller 'pages' of a specified character size.
+    This is a simple character-based split without sentence awareness to avoid using external functions.
+    """
+    if not text:
+        return []
+    
+    pages = []
+    start = 0
+    while start < len(text):
+        end = start + page_size_chars
+        pages.append(text[start:end])
+        start = end
+        
+    return pages
+
+def _analyze_chunk(chunk: str, retries: int = 3, delay: int = 5):
+    """
+    Analyze a single chunk of text for violations using the LLM.
+    Includes basic retry logic.
+    """
+    system_prompt = (
+        """
+You are a legal compliance checker. Your analysis must be based ONLY on United States (US) labor and employment law.
+Output ONLY a valid JSON array of objects, where each object has 'excerpt' and 'explanation'.
+If no violations are found, return an empty array [].
+Do not include any text, markdown, or explanation outside the JSON array.
+"""
+    )
+    user_prompt = f"CONTRACT CHUNK:\n{chunk}\n\nReview this chunk for any violations."
+
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": user_prompt}
+    ]
+
+    for attempt in range(retries):
+        try:
+            response = call_qwen_api(messages)
+            content = response['choices'][0]['message'].get('content', '').strip()
+            
+            # Clean the content to extract only the JSON part
+            json_start = content.find('[')
+            json_end = content.rfind(']')
+            if json_start != -1 and json_end != -1:
+                json_str = content[json_start:json_end+1]
+                return json.loads(json_str)
+            else:
+                print(f"[WARNING] No JSON array found in chunk analysis response: {content}")
+                return [] # Return empty list if no valid JSON is found
+
+        except Exception as e:
+            print(f"[ERROR] Error analyzing chunk (attempt {attempt + 1}/{retries}): {e}")
+            if attempt < retries - 1:
+                time.sleep(delay)
+            else:
+                print(f"[FATAL] Failed to analyze chunk after {retries} attempts.")
+                return [] # Return empty list on failure
+
 def multi_milvus_query(queries, top_k=5):
     results = {}
     for q in queries:
@@ -95,6 +155,57 @@ def process_file_with_llm(file_path: Path, user_question: str = None):
     if not text.strip():
         print(f"No text extracted from {file_path.name}")
         return
+
+    # If the document is long and no specific question is asked, run a chunk-based violation scan.
+    # A specific question requires full context, so we run whole-doc analysis for that.
+    TEXT_LENGTH_THRESHOLD = 24000
+    if len(text) > TEXT_LENGTH_THRESHOLD and not user_question:
+        print(f"Document is long ({len(text)} chars). Running chunk-based violation analysis.")
+        chunks = split_text_into_pages(text, page_size_chars=TEXT_LENGTH_THRESHOLD)
+        print(f"Contract split into {len(chunks)} chunks.")
+
+        all_violations = []
+        for i, chunk in enumerate(chunks):
+            print(f"Analyzing chunk {i + 1}/{len(chunks)}...")
+            chunk_violations = _analyze_chunk(chunk)
+            if chunk_violations:
+                all_violations.extend(chunk_violations)
+            time.sleep(1)  # Rate limit
+
+        if all_violations:
+            contract_name = file_path.stem
+            summary = generate_violation_summary([(v['excerpt'], v['explanation']) for v in all_violations], contract_name)
+            
+            output_dir = 'violation_analysis'
+            os.makedirs(output_dir, exist_ok=True)
+            timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
+            output_file = Path(output_dir) / f"{contract_name}_violation_analysis_CHUNKED_{timestamp}.md"
+
+            with open(output_file, 'w', encoding='utf-8') as f:
+                f.write(f"# Violation Analysis for {contract_name} (Chunked)\n\n")
+                f.write(f"**Analysis Date:** {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n")
+                f.write(f"**Total Violations Found:** {len(all_violations)}\n\n")
+                f.write("## Violations Summary\n\n")
+                f.write(summary)
+                f.write("\n\n## Detailed Violations\n\n")
+                for i, v in enumerate(all_violations, 1):
+                    f.write(f"### Violation {i}\n\n")
+                    f.write(f"**Excerpt:** {v['excerpt']}\n\n")
+                    f.write(f"**Explanation:** {v['explanation']}\n\n")
+                    f.write("---\n\n")
+            
+            print(f"✅ Chunked violation report created: {output_file}")
+        else:
+            print("✅ No violations found after analyzing all chunks.")
+
+        total_end_time = time.time()
+        print(f"[TIMER] Total chunked analysis time: {total_end_time - total_start_time:.2f} seconds.")
+        return # End of chunking path
+    
+    # --- Whole Document Analysis ---
+    if len(text) > TEXT_LENGTH_THRESHOLD:
+        print(f"[WARNING] Document is long ({len(text)} chars) but a specific question was asked. "
+              "Analyzing the whole document at once. This may be slow or hit context limits.")
 
     out_path = Path(OUTPUT_DIR) / f"{file_path.stem}_{session_id}.md"
     with open(out_path, 'w', encoding='utf-8') as f:
@@ -161,8 +272,6 @@ Do not include any text, markdown, or explanation outside the JSON array. Do not
     try:
         # Debug: print prompt and contract size
         print(f"[DEBUG] Prompt length: {len(system_prompt)} | Contract length: {len(text)}")
-        if len(text) > 24000:
-            print("[WARNING] Contract text is very large. The LLM may not process the entire document. Consider splitting the contract.")
         response = call_qwen_api(messages, tools=tool_functions, tool_choice="auto")
         print("[DEBUG] RAW API RESPONSE:", response)
         if 'choices' not in response or not response['choices']:
@@ -273,8 +382,10 @@ def main():
         print(f"File not found: {file_path}")
         return
     delete_all_contract_context()
+
     user_question = input("Enter a specific question for the contract analysis (leave empty for general violation check): ").strip()
     process_file_with_llm(file_path, user_question)
+
 def test():
     final_response = call_qwen_api([{"role": "user", "content": "Tell me a joke"}])
     final_content = final_response['choices'][0]['message']['content'].strip()
