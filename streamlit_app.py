@@ -7,7 +7,6 @@ import re
 import markdown as md_lib
 
 from detect_ambiguity_batch import process_file_with_llm
-from core.milvus_utilis import delete_all_contract_context
 from core.rag_chain import ask_llm
 from core.rag_chain import deep_search_pipeline
 from cli_app import extract_text_from_pdf, extract_text_from_txt
@@ -62,8 +61,6 @@ if uploaded_file:
     st.success(f"Uploaded: {uploaded_file.name}")
     if st.button("Analyze Contract", type="primary"):
         with st.spinner("Analyzing contract... This may take a moment."):
-            delete_all_contract_context()  # Clear previous contract context
-            
             with tempfile.NamedTemporaryFile(delete=False, suffix=Path(uploaded_file.name).suffix) as tmp_file:
                 tmp_file.write(uploaded_file.getbuffer())
                 temp_path = Path(tmp_file.name)

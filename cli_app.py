@@ -14,7 +14,7 @@ from typing import List
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 from core.rag_chain import ask_llm
-from core.milvus_utilis import save_to_milvus, search_similar_chunks, delete_file, delete_all, collection
+from core.milvus_utilis import save_to_chroma, search_similar_chunks, delete_file, delete_all, get_collection
 from core.embedding import split_into_chunks
 import fitz  # PyMuPDF
 
@@ -67,7 +67,7 @@ def process_document(file_path: str) -> bool:
     
     # Save to Milvus
     try:
-        save_to_milvus(chunks, file_path.name)
+        save_to_chroma(chunks, file_path.name)
         print(f"✅ Successfully processed {file_path.name}")
         return True
     except Exception as e:
@@ -182,13 +182,15 @@ def interactive_mode():
                     
             elif user_input.lower() == 'list':
                 try:
-                    collection.load()
-                    results = collection.query(
-                        expr="",
-                        output_fields=["filename"],
+                    collection = get_collection()
+                    results = collection.get(
+                        include=["metadatas"],
                         limit=1000
                     )
-                    filenames = list(set([r["filename"] for r in results]))
+                    filenames = set()
+                    for meta in results.get("metadatas", []):
+                        if meta and "filename" in meta:
+                            filenames.add(meta["filename"])
                     if filenames:
                         print(f"\n📚 Documents in database ({len(filenames)}):")
                         for filename in filenames:
@@ -277,13 +279,15 @@ def main():
                 
         elif args.list:
             try:
-                collection.load()
-                results = collection.query(
-                    expr="",
-                    output_fields=["filename"],
+                collection = get_collection()
+                results = collection.get(
+                    include=["metadatas"],
                     limit=1000
                 )
-                filenames = list(set([r["filename"] for r in results]))
+                filenames = set()
+                for meta in results.get("metadatas", []):
+                    if meta and "filename" in meta:
+                        filenames.add(meta["filename"])
                 if filenames:
                     print(f"\n📚 Documents in database ({len(filenames)}):")
                     for filename in filenames:

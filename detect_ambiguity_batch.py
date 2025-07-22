@@ -1,8 +1,7 @@
 import os
 from pathlib import Path
 from cli_app import extract_text_from_pdf, extract_text_from_txt
-from core.milvus_utilis import search_similar_chunks, save_to_contract_context, search_contract_context
-from core.milvus_utilis import delete_all_contract_context
+from core.milvus_utilis import search_similar_chunks
 import datetime
 import nltk
 import requests
@@ -381,7 +380,6 @@ def main():
     if not file_path.exists():
         print(f"File not found: {file_path}")
         return
-    delete_all_contract_context()
 
     user_question = input("Enter a specific question for the contract analysis (leave empty for general violation check): ").strip()
     process_file_with_llm(file_path, user_question)
