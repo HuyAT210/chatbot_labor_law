@@ -24,7 +24,7 @@ def ask_llm(prompt: str) -> str:
     }
     headers = {
         "Authorization": f"Bearer {QWEN_API_KEY}",
-        "Content-Type": "application/json"
+        "Content-Type": "application/json"  
     }
     if not QWEN_API_URL:
         raise ValueError("QWEN_API_URL is not configured in environment variables")
@@ -114,6 +114,7 @@ Example of CORRECT response format:
 """
     try:
         response = ask_llm(prompt)
+        print(f"SUBQUESTION : {response}")
         response = response.strip()
         start = response.find('[')
         end = response.rfind(']')
@@ -131,9 +132,11 @@ Example of CORRECT response format:
 # --- Semantic Search for Subquestions ---
 def ask_llm_with_context(query: str, chat_history: str = "") -> str:
     results = search_similar_chunks(query, top_k=10)
+    print(f"QUERY : {query}")
     if not results:
         return "No relevant information found."
     context = "\n".join([r["chunk"] for r in results])
+    print(f"CONTEXT : {context}")
     prompt = f"""
 CHAT HISTORY:
 {chat_history}
@@ -190,6 +193,7 @@ IMPORTANT: If this is already iteration {max_iterations} or higher, set "search_
 """
     try:
         response = ask_llm(prompt)
+        print(f"CHECK QUALITY : {response}")
         response = response.strip()
         start = response.find('{')
         end = response.rfind('}')
@@ -266,6 +270,7 @@ The outline should follow this structure:
 """
     try:
         outline = ask_llm(prompt)
+        print(f"OUTLINE : {outline}")
         return outline.strip()
     except Exception as e:
         print(f"⚠️ Error in write_outline: {e}")
@@ -311,6 +316,7 @@ while carefully following the outline structure and maintaining strict adherence
 """
     try:
         answer = ask_llm(prompt)
+        print(f"FINAL : {answer}")
         return answer.strip()
     except Exception as e:
         print(f"⚠️ Error in generate_final_answer: {e}")
@@ -323,7 +329,8 @@ def clean_llm_response(text: str) -> str:
     return text.strip()
 
 # --- Main Deep Search Pipeline ---
-def deep_search_pipeline(query: str, chat_history: str = "") -> str:
+def deep_search_pipeline(query: str, chat_history: str = "", return_trace: bool = False):
+    trace = []
     if not is_labor_law_related(query, chat_history=chat_history):
         prompt = f"""
 CHAT HISTORY:
@@ -336,22 +343,100 @@ USER QUERY: {query}
 Please respond accordingly, if the user query is not related to labor law, please let them know.
 """
         direct_answer = ask_llm(prompt)
-        return clean_llm_response(direct_answer)
+        clean_answer = clean_llm_response(direct_answer)
+        if return_trace:
+            trace.append({"type": "not_labor_law", "content": clean_answer})
+            return {"final_answer": clean_answer, "trace": trace}
+        return clean_answer
     
     subquestions = query_expansion(query, chat_history=chat_history)
+    trace.append({"type": "subquestions", "content": subquestions})
     answers = [None] * len(subquestions)
     max_iterations = 3
     previous_knowledge_gaps = []
     for i in range(max_iterations):
-        answers = [ask_llm_with_context(q, chat_history=chat_history) for q in subquestions]
+        answers = []
+        for q in subquestions:
+            a = ask_llm_with_context(q, chat_history=chat_history)
+            answers.append(a)
+            trace.append({"type": "answer", "question": q, "content": a})
         accepted, new_subquestions = check_answers_quality(
             subquestions, answers, original_query=query, iteration=i + 1, previous_knowledge_gaps=previous_knowledge_gaps, max_iterations=max_iterations, chat_history=chat_history
         )
+        trace.append({
+            "type": "quality_check",
+            "iteration": i + 1,
+            "questions": subquestions,
+            "answers": answers,
+            "accepted": accepted,
+            "new_subquestions": new_subquestions if not accepted else [],
+        })
         if not accepted:
             previous_knowledge_gaps.extend([q for q in new_subquestions if q not in previous_knowledge_gaps])
             subquestions = new_subquestions
         if accepted:
             break
     outline = write_outline(query, subquestions, answers, chat_history=chat_history)
+    trace.append({"type": "outline", "content": outline})
     final_answer = generate_final_answer(query, subquestions, answers, outline, chat_history=chat_history)
-    return clean_llm_response(final_answer)
+    clean_final = clean_llm_response(final_answer)
+    trace.append({"type": "final_answer", "content": clean_final})
+    if return_trace:
+        return {"final_answer": clean_final, "trace": trace}
+    return clean_final
+
+# --- Streaming Deep Search Pipeline (Generator) ---
+def deep_search_pipeline_stream(query: str, chat_history: str = ""):
+    if not is_labor_law_related(query, chat_history=chat_history):
+        prompt = f"""
+CHAT HISTORY:
+{chat_history}
+
+You are an expert labor lawyer specialized in labor and employment law. Your task is to give legal advice based on the original query.
+
+USER QUERY: {query}
+'
+Please respond accordingly, if the user query is not related to labor law, please let them know.
+"""
+        direct_answer = ask_llm(prompt)
+        clean_answer = clean_llm_response(direct_answer)
+        yield {"type": "not_labor_law", "content": clean_answer}
+        return
+    
+    subquestions = query_expansion(query, chat_history=chat_history)
+    clean_subquestions = [clean_llm_response(q) for q in subquestions]
+    yield {"type": "subquestions", "content": clean_subquestions}
+    answers = [None] * len(clean_subquestions)
+    max_iterations = 3
+    previous_knowledge_gaps = []
+    for i in range(max_iterations):
+        answers = []
+        for q in clean_subquestions:
+            a = ask_llm_with_context(q, chat_history=chat_history)
+            clean_a = clean_llm_response(a)
+            answers.append(clean_a)
+            yield {"type": "answer", "question": clean_llm_response(q), "content": clean_a}
+        accepted, new_subquestions = check_answers_quality(
+            clean_subquestions, answers, original_query=query, iteration=i + 1, previous_knowledge_gaps=previous_knowledge_gaps, max_iterations=max_iterations, chat_history=chat_history
+        )
+        # Clean new_subquestions if any
+        clean_new_subquestions = [clean_llm_response(q) for q in new_subquestions] if new_subquestions else []
+        yield {
+            "type": "quality_check",
+            "iteration": i + 1,
+            "questions": clean_subquestions,
+            "answers": answers,
+            "accepted": accepted,
+            "new_subquestions": clean_new_subquestions if not accepted else [],
+        }
+        if not accepted:
+            previous_knowledge_gaps.extend([q for q in clean_new_subquestions if q not in previous_knowledge_gaps])
+            clean_subquestions = clean_new_subquestions
+        if accepted:
+            break
+    outline = write_outline(query, clean_subquestions, answers, chat_history=chat_history)
+    clean_outline = clean_llm_response(outline)
+    yield {"type": "outline", "content": clean_outline}
+    final_answer = generate_final_answer(query, clean_subquestions, answers, clean_outline, chat_history=chat_history)
+    clean_final = clean_llm_response(final_answer)
+    yield {"type": "final_answer", "content": clean_final}

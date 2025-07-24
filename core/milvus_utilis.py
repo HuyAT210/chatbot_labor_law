@@ -115,12 +115,26 @@ def delete_all():
     try:
         global _collection
         chroma_client.delete_collection("documents")
+        # Remove all files and subdirectories in persist_directory
+        for root, dirs, files in os.walk(persist_directory, topdown=False):
+            for name in files:
+                file_path = os.path.join(root, name)
+                try:
+                    os.remove(file_path)
+                except Exception as e:
+                    print(f"❌ Error deleting file {file_path}: {e}")
+            for name in dirs:
+                dir_path = os.path.join(root, name)
+                try:
+                    os.rmdir(dir_path)
+                except Exception as e:
+                    print(f"❌ Error deleting directory {dir_path}: {e}")
         _collection = chroma_client.get_or_create_collection(
             name="documents"
         )
-        print(f"🗑️ Deleted all records from ChromaDB collection.")
+        print(f"🗑️ Deleted all records from ChromaDB collection and cleaned persist directory.")
         return {
-            "message": f"✅ Successfully deleted all records from the database."
+            "message": f"✅ Successfully deleted all records from the database and cleaned persist directory."
         }
     except Exception as e:
         print(f"❌ Error deleting all data: {e}")
